@@ -2,7 +2,7 @@ name: Swarm Runner
 
 on:
   schedule:
-    - cron: '0 * * * *' # Run automatically every hour
+    - cron: '0 12 * * *'
   workflow_dispatch: # Allow manual triggering button
 
 jobs:
