@@ -1,0 +1,29 @@
+name: Generate Sample Datasets
+
+on:
+  workflow_dispatch: # Allow manual on-demand execution
+
+jobs:
+  generate-samples:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate and Upload Samples
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_REPO_ID: ${{ secrets.HF_REPO_ID }}
+        run: |
+          echo "Starting Sample Generation from Global Master..."
+          python -u sample_generator.py
+          echo "Done!"
