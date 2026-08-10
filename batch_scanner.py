@@ -103,30 +103,84 @@ def main():
     print(f"Running scanner: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
     
-    # 5. Upload Results
-    result_path_in_repo = f"SCAN_RESULTS/results_part_{current_part:02d}_offset_{current_offset}.csv"
-    print(f"Uploading results to {result_path_in_repo}...")
-    api.upload_file(
-        path_or_fileobj=output_csv,
-        path_in_repo=result_path_in_repo,
-        repo_id=hf_repo_id,
-        repo_type="dataset",
-        commit_message=f"Add scan results for part {current_part} offset {current_offset}"
-    )
+    # 5. Process and Upload Results
+    import pandas as pd
+    
+    cms_counts = state.get("cms_counts", {})
+    
+    if os.path.exists(output_csv):
+        df = pd.read_csv(output_csv)
+        
+        # Filter for success (Error column is empty or NaN)
+        df_success = df[df['Error'].fillna('') == '']
+        
+        # Filter for known CMS
+        df_known = df_success[df_success['Primary CMS'] != 'Unknown']
+        
+        # Update CMS counts
+        for cms, count in df_known['Primary CMS'].value_counts().items():
+            cms_counts[cms] = cms_counts.get(cms, 0) + int(count)
+            
+        # 5a. Save and Upload Part Results (Success only)
+        result_path_in_repo = f"SCAN_RESULTS/results_part_{current_part:02d}_offset_{current_offset}.parquet"
+        local_result_pq = f"results_part_{current_part:02d}_offset_{current_offset}.parquet"
+        df_success.to_parquet(local_result_pq, index=False)
+        
+        print(f"Uploading part results to {result_path_in_repo}...")
+        api.upload_file(
+            path_or_fileobj=local_result_pq,
+            path_in_repo=result_path_in_repo,
+            repo_id=hf_repo_id,
+            repo_type="dataset",
+            commit_message=f"Add scan results for part {current_part} offset {current_offset}"
+        )
+        os.remove(local_result_pq)
+        
+        # 5b. Save and Upload Combined Results (Known CMS only)
+        combined_path_in_repo = "SCAN_RESULTS/combined_results.parquet"
+        local_combined = "combined_results.parquet"
+        
+        try:
+            print(f"Downloading existing {combined_path_in_repo} to append...")
+            downloaded_combined = hf_hub_download(
+                repo_id=hf_repo_id,
+                repo_type="dataset",
+                filename=combined_path_in_repo
+            )
+            df_combined = pd.read_parquet(downloaded_combined)
+            df_combined = pd.concat([df_combined, df_known], ignore_index=True)
+            print("Appended to existing combined results.")
+        except Exception:
+            print("No existing combined results found. Creating new one.")
+            df_combined = df_known
+            
+        df_combined.to_parquet(local_combined, index=False)
+        print(f"Uploading {combined_path_in_repo}...")
+        api.upload_file(
+            path_or_fileobj=local_combined,
+            path_in_repo=combined_path_in_repo,
+            repo_id=hf_repo_id,
+            repo_type="dataset",
+            commit_message=f"Update combined results up to part {current_part} offset {current_offset}"
+        )
+        os.remove(local_combined)
+    else:
+        print(f"Warning: {output_csv} not found locally! Skipping results upload.")
     
     # 6. Update State
     next_offset = current_offset + lines_extracted
-    # If we didn't extract a full batch, we assume we reached EOF of this part.
     if lines_extracted < batch_size:
         print(f"Reached end of part {current_part}. Advancing to next part.")
         new_state = {
             "current_part": current_part + 1,
-            "current_offset": 0
+            "current_offset": 0,
+            "cms_counts": cms_counts
         }
     else:
         new_state = {
             "current_part": current_part,
-            "current_offset": next_offset
+            "current_offset": next_offset,
+            "cms_counts": cms_counts
         }
         
     print(f"Updating state to: {new_state}")
@@ -139,13 +193,14 @@ def _upload_state(api, repo_id, state_path, state_dict):
     with open(local_state_file, "w") as f:
         json.dump(state_dict, f, indent=4)
         
-    api.upload_file(
-        path_or_fileobj=local_state_file,
-        path_in_repo=state_path,
-        repo_id=repo_id,
-        repo_type="dataset",
-        commit_message="Update scan state"
-    )
+    if os.path.exists(local_state_file):
+        api.upload_file(
+            path_or_fileobj=local_state_file,
+            path_in_repo=state_path,
+            repo_id=repo_id,
+            repo_type="dataset",
+            commit_message="Update scan state"
+        )
 
 if __name__ == "__main__":
     main()
