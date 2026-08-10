@@ -1,11 +1,44 @@
-name: Batch Scan Domains
+name: Batch Scan Domains Grid
 
 on:
   workflow_dispatch:
+    inputs:
+      total_workers:
+        description: 'Total number of parallel workers'
+        required: true
+        default: '20'
+        type: string
+      batch_size:
+        description: 'Domains to process per worker (e.g. 100000)'
+        required: true
+        default: '100000'
+        type: string
+      threads:
+        description: 'Concurrent threads per worker (e.g. 100)'
+        required: true
+        default: '100'
+        type: string
 
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        run: |
+          # Generate a JSON array like [0, 1, 2, ..., N-1]
+          WORKERS=${{ inputs.total_workers }}
+          JSON_ARRAY=$(seq 0 $((WORKERS - 1)) | jq -R . | jq -s -c 'map(tonumber)')
+          echo "matrix=$JSON_ARRAY" >> $GITHUB_OUTPUT
+
   scan:
+    needs: setup
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        worker_id: ${{ fromJson(needs.setup.outputs.matrix) }}
     
     steps:
       - name: Check out repository
@@ -21,9 +54,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install huggingface_hub pandas pyarrow
           
-      - name: Run Batch Scanner
+      - name: Run Batch Scanner (Worker ${{ matrix.worker_id }})
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_REPO_ID: ${{ vars.HF_REPO_ID || secrets.HF_REPO_ID }}
         run: |
-          python batch_scanner.py
+          python batch_scanner.py --worker-id ${{ matrix.worker_id }} --total-workers ${{ inputs.total_workers }} --batch-size ${{ inputs.batch_size }} --threads ${{ inputs.threads }}
