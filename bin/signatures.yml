@@ -1,0 +1,712 @@
+schema_version: '2.0'
+categories:
+  wordpress:
+    type: CMS
+    description: WordPress
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: meta
+      name: generator
+      regex: WordPress
+      weight: 0.95
+    - layer: L6_PROBE
+      type: active_path
+      name: /wp-login.php
+      regex: powered by WordPress
+      weight: 0.95
+  joomla:
+    type: CMS
+    description: Joomla!
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: meta
+      name: generator
+      regex: Joomla!
+      weight: 0.95
+  drupal:
+    type: CMS
+    description: Drupal
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-Generator
+      regex: Drupal
+      weight: 0.95
+  squarespace:
+    type: CMS
+    description: Squarespace
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: Server
+      regex: Squarespace
+      weight: 0.95
+  wix:
+    type: CMS
+    description: Wix
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-Wix-Request-Id
+      weight: 0.95
+  ghost:
+    type: CMS
+    description: Ghost
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-Ghost-Cache-Status
+      weight: 0.95
+  webflow:
+    type: CMS
+    description: Webflow
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: html_id
+      name: html[data-wf-site]
+      weight: 0.95
+  contentful:
+    type: CMS
+    description: Contentful
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-Contentful-Request-Id
+      weight: 0.95
+  sitecore:
+    type: CMS
+    description: Sitecore
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: cookie
+      name: SC_ANALYTICS_GLOBAL_COOKIE
+      weight: 0.95
+  aem:
+    type: CMS
+    description: Adobe Experience Manager
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: dom
+      name: div.aem-Grid
+      weight: 0.95
+  typo3:
+    type: CMS
+    description: TYPO3
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: meta
+      name: generator
+      regex: TYPO3
+      weight: 0.95
+  bitrix:
+    type: CMS
+    description: Bitrix
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-Bitrix-Composite
+      weight: 0.95
+  craftcms:
+    type: CMS
+    description: Craft CMS
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: cookie
+      name: CraftSessionId
+      weight: 0.95
+  silverstripe:
+    type: CMS
+    description: SilverStripe
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: meta
+      name: generator
+      regex: SilverStripe
+      weight: 0.95
+  hubspot_cms:
+    type: CMS
+    description: HubSpot CMS
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-HubSpot-Correlation-Id
+      weight: 0.95
+  shopify:
+    type: E-Commerce
+    description: Shopify
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-ShopId
+      weight: 0.95
+    - layer: L5_HTML
+      type: script_src
+      regex: cdn\.shopify\.com
+      weight: 0.9
+  magento:
+    type: E-Commerce
+    description: Magento
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: cookie
+      name: frontend
+      weight: 0.7
+    - layer: L5_HTML
+      type: script_src
+      regex: mage/cookies\.js
+      weight: 0.95
+  woocommerce:
+    type: E-Commerce
+    description: WooCommerce
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: meta
+      name: generator
+      regex: WooCommerce
+      weight: 0.95
+  bigcommerce:
+    type: E-Commerce
+    description: BigCommerce
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-Bc-Store-Version
+      weight: 0.95
+  salesforce_commerce:
+    type: E-Commerce
+    description: Salesforce Commerce Cloud
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: Server
+      regex: Demandware
+      weight: 0.95
+  prestashop:
+    type: E-Commerce
+    description: PrestaShop
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: meta
+      name: generator
+      regex: PrestaShop
+      weight: 0.95
+  opencart:
+    type: E-Commerce
+    description: OpenCart
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: cookie
+      name: OCSESSID
+      weight: 0.95
+  oscommerce:
+    type: E-Commerce
+    description: osCommerce
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: cookie
+      name: osCsid
+      weight: 0.95
+  zen_cart:
+    type: E-Commerce
+    description: Zen Cart
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: cookie
+      name: zenid
+      weight: 0.95
+  vtex:
+    type: E-Commerce
+    description: VTEX
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-VTEX-Janus-Router
+      weight: 0.95
+  sap_commerce:
+    type: E-Commerce
+    description: SAP Commerce Cloud
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: cookie
+      name: JSESSIONID
+      weight: 0.4
+    - layer: L5_HTML
+      type: body
+      name: hybris
+      weight: 0.9
+  shopware:
+    type: E-Commerce
+    description: Shopware
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: x-shopware-version
+      weight: 0.95
+  nginx:
+    type: Web Server
+    description: Nginx
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: Server
+      regex: nginx
+      weight: 0.95
+  apache:
+    type: Web Server
+    description: Apache HTTP Server
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: Server
+      regex: Apache
+      weight: 0.95
+  iis:
+    type: Web Server
+    description: Microsoft IIS
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: Server
+      regex: Microsoft-IIS
+      weight: 0.95
+  litespeed:
+    type: Web Server
+    description: LiteSpeed
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: Server
+      regex: LiteSpeed
+      weight: 0.95
+  caddy:
+    type: Web Server
+    description: Caddy
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: Server
+      regex: Caddy
+      weight: 0.95
+  cowboy:
+    type: Web Server
+    description: Cowboy
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: Server
+      regex: Cowboy
+      weight: 0.95
+  kestrel:
+    type: Web Server
+    description: Kestrel
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: Server
+      regex: Kestrel
+      weight: 0.95
+  tomcat:
+    type: Web Server
+    description: Apache Tomcat
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: Server
+      regex: Apache-Coyote
+      weight: 0.95
+  nextjs:
+    type: JS Framework
+    description: Next.js
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: x-powered-by
+      regex: Next\.js
+      weight: 0.9
+    - layer: L5_HTML
+      type: dom
+      name: script#__NEXT_DATA__
+      weight: 0.95
+  nuxtjs:
+    type: JS Framework
+    description: Nuxt.js
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: dom
+      name: script#__NUXT__
+      weight: 0.95
+  gatsby:
+    type: JS Framework
+    description: Gatsby
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: dom
+      name: div#___gatsby
+      weight: 0.95
+  react:
+    type: JS Framework
+    description: React
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: dom
+      name: '[data-reactroot]'
+      weight: 0.9
+  vue:
+    type: JS Framework
+    description: Vue.js
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: dom
+      name: '[data-v-]'
+      weight: 0.8
+  angular:
+    type: JS Framework
+    description: Angular
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: dom
+      name: '[ng-version]'
+      weight: 0.95
+  svelte:
+    type: JS Framework
+    description: Svelte
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: dom
+      name: svelte-
+      weight: 0.8
+  cloudflare:
+    type: CDN/WAF
+    description: Cloudflare
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: Server
+      regex: cloudflare
+      weight: 0.95
+    - layer: L4_HEADERS
+      type: header
+      name: CF-RAY
+      weight: 0.95
+  fastly:
+    type: CDN/WAF
+    description: Fastly
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-Fastly-Request-ID
+      weight: 0.95
+  akamai:
+    type: CDN/WAF
+    description: Akamai
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-Akamai-Transformed
+      weight: 0.95
+  cloudfront:
+    type: CDN/WAF
+    description: Amazon CloudFront
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-Amz-Cf-Id
+      weight: 0.95
+  imperva:
+    type: CDN/WAF
+    description: Imperva Incapsula
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-Iinfo
+      weight: 0.95
+  sucuri:
+    type: CDN/WAF
+    description: Sucuri
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: x-sucuri-id
+      weight: 0.95
+  stackpath:
+    type: CDN/WAF
+    description: StackPath
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: header
+      name: X-Edge-IP
+      weight: 0.95
+  google_analytics:
+    type: Analytics
+    description: Google Analytics
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: google-analytics\.com/analytics\.js
+      weight: 0.95
+  gtm:
+    type: Analytics
+    description: Google Tag Manager
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: googletagmanager\.com/gtm\.js
+      weight: 0.95
+  hotjar:
+    type: Analytics
+    description: Hotjar
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: static\.hotjar\.com
+      weight: 0.95
+  mixpanel:
+    type: Analytics
+    description: Mixpanel
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: cdn\.mxpnl\.com
+      weight: 0.95
+  segment:
+    type: Analytics
+    description: Segment
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: cdn\.segment\.com
+      weight: 0.95
+  facebook_pixel:
+    type: Marketing
+    description: Facebook Pixel
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: connect\.facebook\.net/en_US/fbevents\.js
+      weight: 0.95
+  hubspot:
+    type: CRM
+    description: HubSpot
+    confidence_base: 1.0
+    signals:
+    - layer: L4_HEADERS
+      type: cookie
+      name: hubspotutk
+      weight: 0.95
+    - layer: L5_HTML
+      type: script_src
+      regex: js\.hs-scripts\.com
+      weight: 0.95
+  marketo:
+    type: CRM
+    description: Marketo
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: munchkin\.marketo\.net
+      weight: 0.95
+  salesforce_pardot:
+    type: CRM
+    description: Salesforce Pardot
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: pi\.pardot\.com
+      weight: 0.95
+  intercom:
+    type: Chat
+    description: Intercom
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: widget\.intercom\.io
+      weight: 0.95
+  drift:
+    type: Chat
+    description: Drift
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: js\.driftt\.com
+      weight: 0.95
+  zendesk:
+    type: Chat
+    description: Zendesk
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: static\.zdassets\.com
+      weight: 0.95
+  google_adsense:
+    type: Advertising
+    description: Google AdSense
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: pagead2\.googlesyndication\.com
+      weight: 0.95
+  amazon_ads:
+    type: Advertising
+    description: Amazon Advertising
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: aax\.amazon-adsystem\.com
+      weight: 0.95
+  criteo:
+    type: Advertising
+    description: Criteo
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: static\.criteo\.net
+      weight: 0.95
+  taboola:
+    type: Advertising
+    description: Taboola
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: cdn\.taboola\.com
+      weight: 0.95
+  outbrain:
+    type: Advertising
+    description: Outbrain
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: widgets\.outbrain\.com
+      weight: 0.95
+  adult_content:
+    type: Business Intent
+    description: Adult Content
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: meta
+      name: rating
+      regex: RTA-5042-1996-1400-1577-RTA
+      weight: 0.95
+    - layer: L5_HTML
+      type: body
+      name: (?i)(age restricted|must be 18 years or older)
+      weight: 0.6
+  crypto_web3:
+    type: Business Intent
+    description: Cryptocurrency / Web3
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: body
+      name: (?i)(metamask|walletconnect|web3\.js|ethers\.js)
+      weight: 0.85
+  stripe:
+    type: Payments
+    description: Stripe
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: js\.stripe\.com
+      weight: 0.95
+  paypal:
+    type: Payments
+    description: PayPal
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: paypalobjects\.com
+      weight: 0.95
+  braintree:
+    type: Payments
+    description: Braintree
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: js\.braintreegateway\.com
+      weight: 0.95
+  adyen:
+    type: Payments
+    description: Adyen
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: checkoutshopper-live\.adyen\.com
+      weight: 0.95
+  klarna:
+    type: Payments
+    description: Klarna
+    confidence_base: 1.0
+    signals:
+    - layer: L5_HTML
+      type: script_src
+      regex: x\.klarnacdn\.net
+      weight: 0.95
