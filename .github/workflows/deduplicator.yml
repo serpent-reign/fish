@@ -1,8 +1,8 @@
 name: Master Deduplicator
 
 on:
-  schedule:
-    - cron: '0 6 * * 0' # Run automatically every Sunday morning
+  # schedule:
+  #   - cron: '0 6 * * 0' # Run automatically every Sunday morning
   workflow_dispatch: # Allow manual triggering button
 
 jobs:
