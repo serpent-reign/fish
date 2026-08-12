@@ -7,6 +7,7 @@ import time
 import random
 import pandas as pd
 from huggingface_hub import HfApi, hf_hub_download
+from huggingface_hub import CommitOperationAdd
 
 def main():
     parser = argparse.ArgumentParser()
@@ -50,6 +51,9 @@ def main():
     current_part = state.get("current_part", 0)
     current_offset = state.get("current_offset", 0)
     cms_counts = state.get("cms_counts", {})
+    total_scanned = state.get("total_scanned", 0)
+    total_live = state.get("total_live", 0)
+    total_fail = state.get("total_fail", 0)
     
     part_filename = f"GLOBAL_MASTER_part_{current_part:02d}.gz"
     repo_part_path = f"GLOBAL_MASTERS/{part_filename}"
@@ -96,7 +100,10 @@ def main():
         new_state = {
             "current_part": current_part + 1,
             "current_offset": args.worker_id * args.batch_size,
-            "cms_counts": cms_counts
+            "cms_counts": cms_counts,
+            "total_scanned": total_scanned,
+            "total_live": total_live,
+            "total_fail": total_fail
         }
         _upload_state(api, hf_repo_id, state_path, new_state, args.worker_id)
         print("State updated. Run workflow again to process next part.")
@@ -137,45 +144,30 @@ def main():
         for cms, count in df_known['Primary CMS'].value_counts().items():
             cms_counts[cms] = cms_counts.get(cms, 0) + int(count)
             
+        # Update totals
+        total_scanned += len(df)
+        total_live += len(df_success)
+        total_fail += len(df) - len(df_success)
+            
         # Add Jitter to prevent Hugging Face API rate limits / conflicts during matrix upload
         jitter = random.uniform(1, 30)
         print(f"Applying {jitter:.1f}s jitter before uploading results...")
         time.sleep(jitter)
         
-        # 5a. Save and Upload Full Part Results (Success only)
+        # 5a. Save Full Part Results (Success only)
         result_path_in_repo = f"SCAN_RESULTS/full/results_part_{current_part:02d}_worker_{args.worker_id:02d}_offset_{current_offset}.parquet"
         local_result_pq = "temp_results.parquet"
         df_success.to_parquet(local_result_pq, index=False)
         
-        print(f"Uploading part results to {result_path_in_repo}...")
-        api.upload_file(
-            path_or_fileobj=local_result_pq,
-            path_in_repo=result_path_in_repo,
-            repo_id=hf_repo_id,
-            repo_type="dataset",
-            commit_message=f"Add scan results part {current_part} W{args.worker_id} offset {current_offset}"
-        )
-        os.remove(local_result_pq)
-        
-        # 5b. Save and Upload Combined Results (Known CMS only)
-        # HF automatically merges all parquet files in a directory!
+        # 5b. Save Combined Results (Known CMS only)
         combined_path_in_repo = f"SCAN_RESULTS/combined/known_part_{current_part:02d}_worker_{args.worker_id:02d}_offset_{current_offset}.parquet"
         local_combined = "temp_combined.parquet"
-        
         df_known.to_parquet(local_combined, index=False)
-        print(f"Uploading combined block to {combined_path_in_repo}...")
-        api.upload_file(
-            path_or_fileobj=local_combined,
-            path_in_repo=combined_path_in_repo,
-            repo_id=hf_repo_id,
-            repo_type="dataset",
-            commit_message=f"Add known CMS block part {current_part} W{args.worker_id} offset {current_offset}"
-        )
-        os.remove(local_combined)
+        
     else:
         print(f"Warning: {output_csv} not found locally! Skipping results upload.")
     
-    # 6. Update State
+    # 6. Prepare State
     next_offset = current_offset + (args.total_workers * args.batch_size)
     
     if lines_extracted < args.batch_size:
@@ -183,21 +175,54 @@ def main():
         new_state = {
             "current_part": current_part + 1,
             "current_offset": args.worker_id * args.batch_size,
-            "cms_counts": cms_counts
+            "cms_counts": cms_counts,
+            "total_scanned": total_scanned,
+            "total_live": total_live,
+            "total_fail": total_fail
         }
     else:
         new_state = {
             "current_part": current_part,
             "current_offset": next_offset,
-            "cms_counts": cms_counts
+            "cms_counts": cms_counts,
+            "total_scanned": total_scanned,
+            "total_live": total_live,
+            "total_fail": total_fail
         }
         
     print(f"Updating state to: {new_state}")
-    _upload_state(api, hf_repo_id, state_path, new_state, args.worker_id)
+    local_state_file = f"state_worker_{args.worker_id}.json"
+    with open(local_state_file, "w") as f:
+        json.dump(new_state, f, indent=4)
+        
+    # 7. Bundle and Upload all files in a SINGLE commit to avoid rate limits (128 commits/hr)
+    
+    operations = [
+        CommitOperationAdd(path_in_repo=state_path, path_or_fileobj=local_state_file)
+    ]
+    
+    if os.path.exists(output_csv):
+        operations.append(CommitOperationAdd(path_in_repo=result_path_in_repo, path_or_fileobj=local_result_pq))
+        operations.append(CommitOperationAdd(path_in_repo=combined_path_in_repo, path_or_fileobj=local_combined))
+        
+    print(f"Uploading bundled commit with {len(operations)} files...")
+    api.create_commit(
+        repo_id=hf_repo_id,
+        repo_type="dataset",
+        operations=operations,
+        commit_message=f"Update W{args.worker_id} part {current_part} offset {current_offset}"
+    )
+    
+    # Cleanup
+    if os.path.exists(local_state_file): os.remove(local_state_file)
+    if os.path.exists(output_csv):
+        if os.path.exists(local_result_pq): os.remove(local_result_pq)
+        if os.path.exists(local_combined): os.remove(local_combined)
     
     print(f"Worker {args.worker_id} batch scan complete!")
 
 def _upload_state(api, repo_id, state_path, state_dict, worker_id):
+    # Fallback for EOF uploads which only push 1 file
     local_state_file = f"state_worker_{worker_id}.json"
     with open(local_state_file, "w") as f:
         json.dump(state_dict, f, indent=4)
@@ -210,6 +235,7 @@ def _upload_state(api, repo_id, state_path, state_dict, worker_id):
             repo_type="dataset",
             commit_message=f"Update scan state for worker {worker_id}"
         )
+        os.remove(local_state_file)
 
 if __name__ == "__main__":
     main()
