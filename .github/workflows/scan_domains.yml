@@ -1,4 +1,4 @@
-name: Batch Scan Domains Grid
+name: Batch Scan Domains Grid 
 
 on:
   workflow_dispatch:
