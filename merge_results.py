@@ -138,7 +138,8 @@ def main():
         )
         print("Merge process and upload complete!")
     else:
-        print("Nothing to upload.")
+        import sys
+        sys.exit("Nothing to upload. End of all datasets reached! Terminating the workflow to stop any auto-loops.")
 
 if __name__ == "__main__":
     main()
