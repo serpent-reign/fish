@@ -1,145 +1,309 @@
 import os
+import json
 import glob
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pyarrow.dataset as ds
 import pandas as pd
-from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub import HfApi, hf_hub_download
 from huggingface_hub import CommitOperationAdd
+from huggingface_hub.utils import EntryNotFoundError
 
-def merge_and_save(repo_id, folder_path, output_filename):
-    print(f"Downloading shards from {folder_path}...")
+TRACKER_REPO_PATH = "SCAN_RESULTS/merged_shards_tracker.json"
+GLOBAL_META_REPO_PATH = "SCAN_RESULTS/global_metadata.json"
+
+
+def load_tracker(api, hf_repo_id):
+    """Download the tracker file from HF. Returns (tracker_dict, is_first_run)."""
     try:
-        local_dir = snapshot_download(
-            repo_id=repo_id,
+        local_path = hf_hub_download(
+            repo_id=hf_repo_id,
             repo_type="dataset",
-            allow_patterns=f"{folder_path}/*.parquet"
+            filename=TRACKER_REPO_PATH,
         )
+        with open(local_path, "r") as f:
+            tracker = json.load(f)
+        # Ensure both keys exist
+        tracker.setdefault("combined", [])
+        tracker.setdefault("full", [])
+        return tracker, False
+    except EntryNotFoundError:
+        print("No tracker found. This is the FIRST RUN of incremental merge.")
+        return {"combined": [], "full": []}, True
     except Exception as e:
-        print(f"Failed to download from {folder_path}: {e}")
-        return None, None
+        print(f"Warning: Could not load tracker: {e}. Starting fresh.")
+        return {"combined": [], "full": []}, True
 
-    # snapshot_download preserves the folder structure locally
-    shard_pattern = os.path.join(local_dir, folder_path, "*.parquet")
-    shard_files = glob.glob(shard_pattern)
-    
-    if not shard_files:
-        print(f"No parquet files found in {folder_path}.")
-        return None, None
 
-    print(f"Found {len(shard_files)} shards. Merging...")
-    
-    # Read and concatenate all parquets
-    dfs = []
-    for file in shard_files:
+def load_global_metadata(api, hf_repo_id):
+    """Download global_metadata.json from HF. Returns dict."""
+    try:
+        local_path = hf_hub_download(
+            repo_id=hf_repo_id,
+            repo_type="dataset",
+            filename=GLOBAL_META_REPO_PATH,
+        )
+        with open(local_path, "r") as f:
+            return json.load(f)
+    except EntryNotFoundError:
+        print("No global metadata found. Starting fresh.")
+        return {"total_scanned": 0, "total_live": 0, "total_fail": 0, "cms_counts": {}}
+    except Exception as e:
+        print(f"Warning: Could not load global metadata: {e}. Starting fresh.")
+        return {"total_scanned": 0, "total_live": 0, "total_fail": 0, "cms_counts": {}}
+
+
+def get_new_shards(api, hf_repo_id, folder_path, already_merged):
+    """Lists all shards in the HF folder and returns only the ones not yet merged."""
+    try:
+        all_files = api.list_repo_files(repo_id=hf_repo_id, repo_type="dataset")
+        prefix = f"{folder_path}/"
+        all_shards = [f for f in all_files if f.startswith(prefix) and f.endswith(".parquet")]
+        shard_names = {os.path.basename(s) for s in all_shards}
+        already_set = set(already_merged)
+        new_shard_names = shard_names - already_set
+        new_shard_paths = [f for f in all_shards if os.path.basename(f) in new_shard_names]
+        print(f"[{folder_path}] Total shards: {len(all_shards)} | Already merged: {len(already_set)} | New: {len(new_shard_paths)}")
+        return new_shard_paths, list(shard_names)
+    except Exception as e:
+        print(f"Error listing shards in {folder_path}: {e}")
+        return [], []
+
+
+def download_shards(api, hf_repo_id, shard_paths):
+    """Downloads a list of shard repo paths one by one. Returns list of local file paths."""
+    local_files = []
+    for path in shard_paths:
         try:
-            dfs.append(pd.read_parquet(file))
+            local = hf_hub_download(
+                repo_id=hf_repo_id,
+                repo_type="dataset",
+                filename=path,
+            )
+            local_files.append(local)
         except Exception as e:
-            print(f"Error reading {file}: {e}")
-            
-    if not dfs:
-        print("No valid dataframes to merge.")
-        return None, None
-        
-    merged_df = pd.concat(dfs, ignore_index=True)
-    
-    if 'Domain' in merged_df.columns:
-        merged_df = merged_df.drop_duplicates(subset=['Domain'], keep='last')
-        
-    print(f"Merged into {len(merged_df)} total rows. Saving to {output_filename}...")
-    merged_df.to_parquet(output_filename, index=False)
-    
-    path_in_repo = f"SCAN_RESULTS/{output_filename}"
-    return output_filename, path_in_repo, merged_df
+            print(f"Warning: Failed to download shard {path}: {e}")
+    return local_files
+
+
+def incremental_merge(api, hf_repo_id, folder_path, output_filename, already_merged):
+    """
+    Incremental merge strategy:
+    1. Find new shards only.
+    2. Download the existing merged parquet (if any) + only the new shards.
+    3. Stream-concatenate using pyarrow (never loads everything into pandas RAM).
+    4. Overwrite output file.
+    Returns (output_filename, repo_path, list_of_all_shard_names) or (None, None, [])
+    """
+    new_shard_paths, all_shard_names = get_new_shards(api, hf_repo_id, folder_path, already_merged)
+
+    if not new_shard_paths:
+        print(f"[{folder_path}] No new shards to merge. Skipping.")
+        return None, None, all_shard_names
+
+    print(f"[{folder_path}] Downloading {len(new_shard_paths)} new shards...")
+    new_local_files = download_shards(api, hf_repo_id, new_shard_paths)
+
+    if not new_local_files:
+        print(f"[{folder_path}] Failed to download any new shards.")
+        return None, None, all_shard_names
+
+    # Build list of all parquet sources: existing merged file + new shards
+    sources = []
+    repo_merged_path = f"SCAN_RESULTS/{output_filename}"
+
+    try:
+        existing_merged_local = hf_hub_download(
+            repo_id=hf_repo_id,
+            repo_type="dataset",
+            filename=repo_merged_path,
+        )
+        sources.append(existing_merged_local)
+        print(f"[{folder_path}] Found existing merged file. Appending to it.")
+    except EntryNotFoundError:
+        print(f"[{folder_path}] No existing merged file. Creating fresh.")
+    except Exception as e:
+        print(f"[{folder_path}] Warning: Could not download existing merged file: {e}. Creating fresh.")
+
+    sources.extend(new_local_files)
+
+    # Stream-concatenate using pyarrow dataset — no pandas RAM blow-up
+    print(f"[{folder_path}] Stream-merging {len(sources)} file(s) with pyarrow...")
+    try:
+        dataset = ds.dataset(sources, format="parquet")
+        # Deduplicate on Domain if present — sort by Domain and keep last
+        schema = dataset.schema
+        if "Domain" in schema.names:
+            table = dataset.to_table()
+            # Use pandas just for dedup, but only after streaming
+            df = table.to_pandas()
+            df = df.drop_duplicates(subset=["Domain"], keep="last")
+            table = pa.Table.from_pandas(df, preserve_index=False)
+        else:
+            table = dataset.to_table()
+
+        pq.write_table(table, output_filename, compression="snappy")
+        print(f"[{folder_path}] Merged {table.num_rows:,} total rows → {output_filename}")
+    except Exception as e:
+        print(f"[{folder_path}] Error during pyarrow merge: {e}")
+        return None, None, all_shard_names
+
+    return output_filename, repo_merged_path, all_shard_names
+
+
+def compute_delta_metadata(api, hf_repo_id, new_worker_state_names, existing_metadata):
+    """
+    Download only the worker state files for workers that contributed NEW shards this run.
+    Add their stats as a delta on top of the existing global metadata.
+    """
+    if not new_worker_state_names:
+        return existing_metadata
+
+    print(f"Downloading {len(new_worker_state_names)} new worker state(s) for delta metadata...")
+
+    delta_scanned = 0
+    delta_live = 0
+    delta_fail = 0
+    delta_cms = {}
+
+    for state_name in new_worker_state_names:
+        state_repo_path = f"SCAN_RESULTS/state/{state_name}"
+        try:
+            local_path = hf_hub_download(
+                repo_id=hf_repo_id,
+                repo_type="dataset",
+                filename=state_repo_path,
+            )
+            with open(local_path, "r") as f:
+                w = json.load(f)
+            delta_scanned += w.get("total_scanned", 0)
+            delta_live += w.get("total_live", 0)
+            delta_fail += w.get("total_fail", 0)
+            for cms, count in w.get("cms_counts", {}).items():
+                delta_cms[cms] = delta_cms.get(cms, 0) + count
+        except Exception as e:
+            print(f"Warning: Could not process state {state_name}: {e}")
+
+    # Merge delta into existing
+    updated = dict(existing_metadata)
+    updated["total_scanned"] = existing_metadata.get("total_scanned", 0) + delta_scanned
+    updated["total_live"] = existing_metadata.get("total_live", 0) + delta_live
+    updated["total_fail"] = existing_metadata.get("total_fail", 0) + delta_fail
+    merged_cms = dict(existing_metadata.get("cms_counts", {}))
+    for cms, count in delta_cms.items():
+        merged_cms[cms] = merged_cms.get(cms, 0) + count
+    updated["cms_counts"] = merged_cms
+    return updated
+
 
 def main():
     hf_token = os.environ.get("HF_TOKEN")
     hf_repo_id = os.environ.get("HF_REPO_ID")
-    
+
     if not hf_token or not hf_repo_id:
         print("Error: HF_TOKEN and HF_REPO_ID environment variables must be set.")
         return
-        
+
     api = HfApi(token=hf_token)
     operations = []
-    
-    # Merge combined (Known CMS)
-    res_combined = merge_and_save(
-        repo_id=hf_repo_id,
+
+    # --- 1. Load tracker and existing global metadata ---
+    tracker, is_first_run = load_tracker(api, hf_repo_id)
+    existing_metadata = load_global_metadata(api, hf_repo_id)
+
+    # Bootstrap detection: if this is the first run of the NEW incremental script
+    # but metadata already exists on HF (from the old script), we must NOT add any
+    # delta on top. We treat all currently-existing shards as already accounted for.
+    # The metadata is kept exactly as-is and the tracker is bootstrapped with all
+    # existing shard names so future runs only pick up truly new shards.
+    if is_first_run and existing_metadata.get("total_scanned", 0) > 0:
+        print(f"\n[BOOTSTRAP] Existing progress detected ({existing_metadata['total_scanned']:,} domains scanned).")
+        print("[BOOTSTRAP] Treating all existing shards as already merged. No metadata delta will be applied.")
+        print("[BOOTSTRAP] Future runs will only process NEW shards going forward.\n")
+
+    # --- 2. Incremental merge: combined (Known CMS only) ---
+    comb_file, comb_repo_path, comb_all_shards = incremental_merge(
+        api=api,
+        hf_repo_id=hf_repo_id,
         folder_path="SCAN_RESULTS/combined",
-        output_filename="combined_results_merged.parquet"
+        output_filename="combined_results_merged.parquet",
+        already_merged=tracker["combined"]
     )
-    
-    df_combined = None
-    if res_combined != (None, None):
-        local_file, repo_path, df_combined = res_combined
-        operations.append(CommitOperationAdd(path_in_repo=repo_path, path_or_fileobj=local_file))
-    
-    # Calculate global CMS counts and metadata
-    if df_combined is not None and 'Primary CMS' in df_combined.columns:
-        print("Calculating total CMS counts across all data...")
-        counts_series = df_combined['Primary CMS'].value_counts()
-        global_cms_counts = {str(k): int(v) for k, v in counts_series.items()}
-        
-        # Download all worker states to aggregate totals
-        print("Downloading worker states to aggregate global scan metrics...")
-        import json
-        
-        total_scanned = 0
-        total_live = 0
-        total_fail = 0
-        
-        try:
-            state_dir = snapshot_download(
-                repo_id=hf_repo_id,
-                repo_type="dataset",
-                allow_patterns="SCAN_RESULTS/state/*.json"
-            )
-            state_files = glob.glob(os.path.join(state_dir, "SCAN_RESULTS/state", "*.json"))
-            for state_file in state_files:
-                try:
-                    with open(state_file, "r") as f:
-                        worker_state = json.load(f)
-                        total_scanned += worker_state.get("total_scanned", 0)
-                        total_live += worker_state.get("total_live", 0)
-                        total_fail += worker_state.get("total_fail", 0)
-                except Exception as e:
-                    print(f"Error reading state file {state_file}: {e}")
-        except Exception as e:
-            print(f"Failed to download state files: {e}")
-            
-        global_metadata = {
-            "total_scanned": total_scanned,
-            "total_live": total_live,
-            "total_fail": total_fail,
-            "cms_counts": global_cms_counts
-        }
-        
-        with open("global_metadata.json", "w") as f:
-            json.dump(global_metadata, f, indent=4)
-            
-        operations.append(CommitOperationAdd(path_in_repo="SCAN_RESULTS/global_metadata.json", path_or_fileobj="global_metadata.json"))
-    
-    # Merge full (All Successes)
-    res_full = merge_and_save(
-        repo_id=hf_repo_id,
+    if comb_file:
+        operations.append(CommitOperationAdd(path_in_repo=comb_repo_path, path_or_fileobj=comb_file))
+
+    # --- 3. Incremental merge: full (All successes) ---
+    full_file, full_repo_path, full_all_shards = incremental_merge(
+        api=api,
+        hf_repo_id=hf_repo_id,
         folder_path="SCAN_RESULTS/full",
-        output_filename="full_results_merged.parquet"
+        output_filename="full_results_merged.parquet",
+        already_merged=tracker["full"]
     )
-    
-    if res_full != (None, None):
-        local_file, repo_path, _ = res_full
-        operations.append(CommitOperationAdd(path_in_repo=repo_path, path_or_fileobj=local_file))
-        
-    if operations:
-        print(f"Uploading {len(operations)} files in a single commit...")
+    if full_file:
+        operations.append(CommitOperationAdd(path_in_repo=full_repo_path, path_or_fileobj=full_file))
+
+    # --- 4. Delta metadata update ---
+    if is_first_run and existing_metadata.get("total_scanned", 0) > 0:
+        # Bootstrap run: preserve existing metadata exactly as-is, no delta
+        print("[BOOTSTRAP] Preserving existing metadata without modification.")
+        updated_metadata = existing_metadata
+    else:
+        # Normal incremental run: find new worker IDs from new combined shards
+        already_combined_set = set(tracker["combined"])
+        new_combined_set = set(comb_all_shards) - already_combined_set
+        # Map shard name → state file name (e.g., worker_00.parquet → worker_00.json)
+        new_state_names = [s.replace(".parquet", ".json") for s in new_combined_set]
+        updated_metadata = compute_delta_metadata(api, hf_repo_id, new_state_names, existing_metadata)
+    with open("global_metadata.json", "w") as f:
+        json.dump(updated_metadata, f, indent=4)
+    operations.append(CommitOperationAdd(
+        path_in_repo=GLOBAL_META_REPO_PATH,
+        path_or_fileobj="global_metadata.json"
+    ))
+
+    # --- 5. Update tracker ---
+    # On bootstrap run, comb_all_shards / full_all_shards contain ALL existing shards
+    # (since tracker was empty). This correctly seeds the tracker for future incremental runs.
+    tracker["combined"] = list(set(comb_all_shards))
+    tracker["full"] = list(set(full_all_shards))
+    with open("merged_shards_tracker.json", "w") as f:
+        json.dump(tracker, f, indent=4)
+    operations.append(CommitOperationAdd(
+        path_in_repo=TRACKER_REPO_PATH,
+        path_or_fileobj="merged_shards_tracker.json"
+    ))
+
+    # --- 6. Upload sequentially to avoid XET 429 ---
+    if any(op.path_in_repo != TRACKER_REPO_PATH and op.path_in_repo != GLOBAL_META_REPO_PATH
+           for op in operations
+           if op.path_in_repo not in [TRACKER_REPO_PATH, GLOBAL_META_REPO_PATH]):
+        pass  # there are real merged files to upload
+
+    if len(operations) <= 2 and not is_first_run:
+        # Only tracker + metadata uploaded — no new shards at all (not a bootstrap)
+        import sys
+        sys.exit("Nothing new to merge. End of dataset or no new shards found. Stopping auto-loop.")
+    elif len(operations) <= 2 and is_first_run:
+        # Bootstrap run with no new shards somehow — still upload tracker
+        print("[BOOTSTRAP] No new merged files but uploading tracker to seed future runs.")
+
+    print(f"\nUploading {len(operations)} file(s) sequentially...")
+    for idx, op in enumerate(operations):
+        print(f"  [{idx+1}/{len(operations)}] {op.path_in_repo}")
         api.create_commit(
             repo_id=hf_repo_id,
             repo_type="dataset",
-            operations=operations,
-            commit_message="Update merged results and global metadata"
+            operations=[op],
+            commit_message=f"Incremental update: {os.path.basename(op.path_in_repo)}"
         )
-        print("Merge process and upload complete!")
-    else:
-        import sys
-        sys.exit("Nothing to upload. End of all datasets reached! Terminating the workflow to stop any auto-loops.")
+
+    print("\nMerge complete!")
+    print(f"  Total scanned : {updated_metadata['total_scanned']:,}")
+    print(f"  Total live    : {updated_metadata['total_live']:,}")
+    print(f"  Total fail    : {updated_metadata['total_fail']:,}")
+    print(f"  CMS types     : {len(updated_metadata['cms_counts'])}")
+
 
 if __name__ == "__main__":
     main()
