@@ -1,4 +1,4 @@
-name: Batch Scan Domains Grid 
+name: Batch Scan Domains Grid
 
 on:
   workflow_dispatch:
@@ -11,13 +11,18 @@ on:
       batch_size:
         description: 'Domains to process per worker (e.g. 100000)'
         required: true
-        default: '30000'
+        default: '100000'
         type: string
       threads:
         description: 'Concurrent threads per worker (e.g. 100)'
         required: true
-        default: '50'
+        default: '100'
         type: string
+      auto_loop:
+        description: 'Automatically trigger the next run when finished (Requires PAT_TOKEN secret)'
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   setup:
@@ -85,3 +90,11 @@ jobs:
           HF_REPO_ID: ${{ vars.HF_REPO_ID || secrets.HF_REPO_ID }}
         run: |
           python merge_results.py
+
+      - name: Trigger Next Run (Auto Loop)
+        if: ${{ inputs.auto_loop == 'true' || inputs.auto_loop == true }}
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          echo "Auto-loop is enabled! Triggering the next batch..."
+          gh workflow run scan_domains.yml -f total_workers=${{ inputs.total_workers }} -f batch_size=${{ inputs.batch_size }} -f threads=${{ inputs.threads }} -f auto_loop=true
