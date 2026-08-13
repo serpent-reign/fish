@@ -82,7 +82,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install huggingface_hub pandas pyarrow
+          pip install "huggingface_hub[hf_xet]" pandas "pyarrow>=14.0"
           
       - name: Run Merge Results
         env:
