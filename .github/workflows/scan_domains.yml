@@ -11,12 +11,12 @@ on:
       batch_size:
         description: 'Domains to process per worker (e.g. 100000)'
         required: true
-        default: '100000'
+        default: '40000'
         type: string
       threads:
         description: 'Concurrent threads per worker (e.g. 100)'
         required: true
-        default: '100'
+        default: '50'
         type: string
       auto_loop:
         description: 'Automatically trigger the next run when finished (Requires PAT_TOKEN secret)'
