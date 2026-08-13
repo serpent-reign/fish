@@ -151,49 +151,50 @@ def incremental_merge(api, hf_repo_id, folder_path, output_filename, already_mer
     return output_filename, repo_merged_path, all_shard_names
 
 
-def compute_delta_metadata(api, hf_repo_id, new_worker_state_names, existing_metadata):
+def compute_metadata_from_workers(api, hf_repo_id):
     """
-    Download only the worker state files for workers that contributed NEW shards this run.
-    Add their stats as a delta on top of the existing global metadata.
+    Discovers and downloads all worker_XX.json state files dynamically from HF.
+    Sums their cumulative totals. Immune to scaling workers up or down.
     """
-    if not new_worker_state_names:
-        return existing_metadata
+    all_files = api.list_repo_files(repo_id=hf_repo_id, repo_type="dataset")
+    state_files = sorted([
+        f for f in all_files
+        if f.startswith("SCAN_RESULTS/state/worker_") and f.endswith(".json")
+    ])
 
-    print(f"Downloading {len(new_worker_state_names)} new worker state(s) for delta metadata...")
+    if not state_files:
+        print("No worker state files found.")
+        return {"total_scanned": 0, "total_live": 0, "total_fail": 0, "cms_counts": {}}
 
-    delta_scanned = 0
-    delta_live = 0
-    delta_fail = 0
-    delta_cms = {}
+    print(f"Found {len(state_files)} worker state file(s). Downloading and summing...")
+    total_scanned = 0
+    total_live = 0
+    total_fail = 0
+    cms_counts = {}
 
-    for state_name in new_worker_state_names:
-        state_repo_path = f"SCAN_RESULTS/state/{state_name}"
+    for state_path in state_files:
         try:
             local_path = hf_hub_download(
                 repo_id=hf_repo_id,
                 repo_type="dataset",
-                filename=state_repo_path,
+                filename=state_path,
             )
             with open(local_path, "r") as f:
                 w = json.load(f)
-            delta_scanned += w.get("total_scanned", 0)
-            delta_live += w.get("total_live", 0)
-            delta_fail += w.get("total_fail", 0)
+            total_scanned += w.get("total_scanned", 0)
+            total_live += w.get("total_live", 0)
+            total_fail += w.get("total_fail", 0)
             for cms, count in w.get("cms_counts", {}).items():
-                delta_cms[cms] = delta_cms.get(cms, 0) + count
+                cms_counts[cms] = cms_counts.get(cms, 0) + int(count)
         except Exception as e:
-            print(f"Warning: Could not process state {state_name}: {e}")
+            print(f"  Warning: Could not read {state_path}: {e}")
 
-    # Merge delta into existing
-    updated = dict(existing_metadata)
-    updated["total_scanned"] = existing_metadata.get("total_scanned", 0) + delta_scanned
-    updated["total_live"] = existing_metadata.get("total_live", 0) + delta_live
-    updated["total_fail"] = existing_metadata.get("total_fail", 0) + delta_fail
-    merged_cms = dict(existing_metadata.get("cms_counts", {}))
-    for cms, count in delta_cms.items():
-        merged_cms[cms] = merged_cms.get(cms, 0) + count
-    updated["cms_counts"] = merged_cms
-    return updated
+    return {
+        "total_scanned": total_scanned,
+        "total_live": total_live,
+        "total_fail": total_fail,
+        "cms_counts": cms_counts
+    }
 
 
 def main():
@@ -243,18 +244,8 @@ def main():
     if full_file:
         operations.append(CommitOperationAdd(path_in_repo=full_repo_path, path_or_fileobj=full_file))
 
-    # --- 4. Delta metadata update ---
-    if is_first_run and existing_metadata.get("total_scanned", 0) > 0:
-        # Bootstrap run: preserve existing metadata exactly as-is, no delta
-        print("[BOOTSTRAP] Preserving existing metadata without modification.")
-        updated_metadata = existing_metadata
-    else:
-        # Normal incremental run: find new worker IDs from new combined shards
-        already_combined_set = set(tracker["combined"])
-        new_combined_set = set(comb_all_shards) - already_combined_set
-        # Map shard name → state file name (e.g., worker_00.parquet → worker_00.json)
-        new_state_names = [s.replace(".parquet", ".json") for s in new_combined_set]
-        updated_metadata = compute_delta_metadata(api, hf_repo_id, new_state_names, existing_metadata)
+    # --- 4. Metadata: discover and re-sum ALL worker states on HF ---
+    updated_metadata = compute_metadata_from_workers(api, hf_repo_id)
     with open("global_metadata.json", "w") as f:
         json.dump(updated_metadata, f, indent=4)
     operations.append(CommitOperationAdd(
