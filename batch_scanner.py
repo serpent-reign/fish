@@ -124,6 +124,7 @@ def main():
         "--output", output_csv,
         "--signatures", sig_path,
         "--threads", str(args.threads),
+        "--timeout", "10",
         "--headless"
     ]
     
