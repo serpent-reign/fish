@@ -135,15 +135,22 @@ def incremental_merge(api, hf_repo_id, folder_path, output_filename, already_mer
         schema = dataset.schema
         if "Domain" in schema.names:
             table = dataset.to_table()
-            # Use pandas just for dedup, but only after streaming
             df = table.to_pandas()
-            df = df.drop_duplicates(subset=["Domain"], keep="last")
+            del table  # Free Arrow table memory immediately
+            import gc; gc.collect()
+            
+            df.drop_duplicates(subset=["Domain"], keep="last", inplace=True)
             table = pa.Table.from_pandas(df, preserve_index=False)
+            del df  # Free Pandas dataframe memory immediately
+            gc.collect()
         else:
             table = dataset.to_table()
 
         pq.write_table(table, output_filename, compression="snappy")
         print(f"[{folder_path}] Merged {table.num_rows:,} total rows → {output_filename}")
+        del table
+        del dataset
+        import gc; gc.collect()
     except Exception as e:
         print(f"[{folder_path}] Error during pyarrow merge: {e}")
         return None, None, all_shard_names
