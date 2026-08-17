@@ -127,30 +127,50 @@ def incremental_merge(api, hf_repo_id, folder_path, output_filename, already_mer
 
     sources.extend(new_local_files)
 
-    # Stream-concatenate using pyarrow dataset — no pandas RAM blow-up
-    print(f"[{folder_path}] Stream-merging {len(sources)} file(s) with pyarrow...")
+    # Stream-concatenate using pyarrow dataset — chunked to save RAM
+    print(f"[{folder_path}] Stream-merging {len(sources)} file(s) with PyArrow native chunking...")
+    
+    # Reverse sources so the NEWEST files are processed first. 
+    # This allows us to keep the "last" (most recent) scan for a domain by keeping its FIRST occurrence.
+    sources.reverse()
+    
     try:
         dataset = ds.dataset(sources, format="parquet")
-        # Deduplicate on Domain if present — sort by Domain and keep last
         schema = dataset.schema
-        if "Domain" in schema.names:
-            table = dataset.to_table()
-            df = table.to_pandas()
-            del table  # Free Arrow table memory immediately
-            import gc; gc.collect()
+        
+        seen_domains = set()
+        writer = None
+        total_rows_written = 0
+        
+        for batch in dataset.to_batches():
+            if "Domain" in schema.names:
+                domains = batch.column("Domain").to_pylist()
+                mask = []
+                for d in domains:
+                    if d not in seen_domains:
+                        mask.append(True)
+                        seen_domains.add(d)
+                    else:
+                        mask.append(False)
+                
+                mask_array = pa.array(mask, type=pa.bool_())
+                import pyarrow.compute as pc
+                filtered_batch = batch.filter(mask_array)
+            else:
+                filtered_batch = batch
+                
+            if writer is None:
+                writer = pq.ParquetWriter(output_filename, schema, compression="snappy")
+                
+            if filtered_batch.num_rows > 0:
+                writer.write_batch(filtered_batch)
+                total_rows_written += filtered_batch.num_rows
+                
+        if writer:
+            writer.close()
             
-            df.drop_duplicates(subset=["Domain"], keep="last", inplace=True)
-            table = pa.Table.from_pandas(df, preserve_index=False)
-            del df  # Free Pandas dataframe memory immediately
-            gc.collect()
-        else:
-            table = dataset.to_table()
-
-        pq.write_table(table, output_filename, compression="snappy")
-        print(f"[{folder_path}] Merged {table.num_rows:,} total rows → {output_filename}")
-        del table
-        del dataset
-        import gc; gc.collect()
+        print(f"[{folder_path}] Merged {total_rows_written:,} total rows → {output_filename}")
+        
     except Exception as e:
         print(f"[{folder_path}] Error during pyarrow merge: {e}")
         return None, None, all_shard_names
